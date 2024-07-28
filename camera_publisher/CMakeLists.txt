@@ -8,6 +8,28 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(image_transport REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(OpenCV REQUIRED)
+
+# Add executable
+add_executable(image_pub src/image_pub.cpp)
+
+# Link libraries
+ament_target_dependencies(image_pub
+  rclcpp
+  sensor_msgs
+  cv_bridge
+  image_transport
+  std_msgs
+  OpenCV
+)
+
+# Install targets
+install(TARGETS image_pub
+  DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
