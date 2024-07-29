@@ -16,6 +16,7 @@ find_package(OpenCV REQUIRED)
 
 # Add executable
 add_executable(image_pub src/image_pub.cpp)
+add_executable(camera_calibration src/camera_calibration.cpp)
 
 # Link libraries
 ament_target_dependencies(image_pub
@@ -27,8 +28,13 @@ ament_target_dependencies(image_pub
   OpenCV
 )
 
+ament_target_dependencies(camera_calibration
+  rclcpp
+  OpenCV
+)
+
 # Install targets
-install(TARGETS image_pub
+install(TARGETS image_pub camera_calibration
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)

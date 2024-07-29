@@ -26,7 +26,7 @@ private:
     void publish_image()
     {
         // Create capture from camera 2 (change later)
-        cv::VideoCapture cap(2);
+        cv::VideoCapture cap(0);
 
         // Check if the camera is opened
         if (!cap.isOpened())
@@ -40,7 +40,7 @@ private:
         cap >> frame;
 
         // Resize the image
-        cv::resize(frame, frame, cv::Size(640, 480));
+        cv::resize(frame, frame, cv::Size(960, 720));
 
         // Create a message to store the image
         msg_ = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", frame).toImageMsg();
