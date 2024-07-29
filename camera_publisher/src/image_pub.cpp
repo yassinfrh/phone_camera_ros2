@@ -15,7 +15,7 @@ public:
     ImagePublisher(int camera_id) : Node("image_publisher"), count_(0), camera_id_(camera_id)
     {
         // Publisher for the image
-        publisher_ = this->create_publisher<sensor_msgs::msg::Image>("/android_camera/image", 10);
+        publisher_ = this->create_publisher<sensor_msgs::msg::Image>("/phone_camera/image", 10);
 
         // Timer to publish the image
         timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&ImagePublisher::publish_image, this));
