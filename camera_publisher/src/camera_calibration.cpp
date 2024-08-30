@@ -10,15 +10,13 @@
 #include <memory>
 #include <fstream>
 #include <filesystem>
-#include <thread>
+#include <ament_index_cpp/get_package_share_directory.hpp>
 
-// TODO: Create generlized path for the images and calibration parameters
-
-// Path to images for calibration
-const std::string images_path = "/home/yassin/ros_ws/src/phone_camera_ros2/camera_publisher/calibration_images/";
+// Package share directory
+std::string package_share_directory = ament_index_cpp::get_package_share_directory("camera_publisher");
 
 // Path to store the calibration parameters
-const std::string calibration_path = "/home/yassin/ros_ws/src/phone_camera_ros2/camera_publisher/calibration_parameters/";
+const std::string calibration_path = package_share_directory + "/calibration_parameters/";
 
 // Free function to handle the mouse callback
 void onMouse(int event, int x, int y, int flags, void *userdata);
@@ -26,13 +24,11 @@ void onMouse(int event, int x, int y, int flags, void *userdata);
 class CameraCalibration : public rclcpp::Node
 {
 public:
-    CameraCalibration(int camera_id) : Node("camera_calibration"), camera_id_(camera_id)
+    CameraCalibration(int camera_id, int checkerboard[2]) : Node("camera_calibration"), camera_id_(camera_id)
     {
-        // Create the images directory if it does not exist
-        if (!std::filesystem::exists(images_path))
-        {
-            std::filesystem::create_directories(images_path);
-        }
+        // Initialize the checkerboard size
+        checkerboard_[0] = checkerboard[0];
+        checkerboard_[1] = checkerboard[1];
 
         // Create the calibration directory if it does not exist
         if (!std::filesystem::exists(calibration_path))
@@ -40,115 +36,25 @@ public:
             std::filesystem::create_directories(calibration_path);
         }
 
-        // Initialize the counter to 0 if there are no images
-        if (std::filesystem::is_empty(images_path))
-        {
-            count_ = 0;
-        }
-        else
-        {
-            // Count the number of images in the directory
-            count_ = std::distance(std::filesystem::directory_iterator(images_path), std::filesystem::directory_iterator{});
-        }
-
         // Timer to display the image
-        display_timer_ = this->create_wall_timer(std::chrono::milliseconds(30), std::bind(&CameraCalibration::show_image, this));
-    }
-
-    // Function to save the image
-    void save_image()
-    {
-        // Check if the image is empty
-        if (image_.empty())
-        {
-            RCLCPP_ERROR(this->get_logger(), "Error saving image");
-            return;
-        }
-
-        // Save the image
-        std::string image_name = images_path + "image" + std::to_string(count_) + ".png";
-        cv::imwrite(image_name, image_);
-
-        // Increment the counter
-        count_++;
+        display_timer_ = this->create_wall_timer(std::chrono::milliseconds(100), std::bind(&CameraCalibration::show_image, this));
     }
 
     // Function to perform the calibration
     void perform_calibration()
     {
-        // TODO: ask for the checkerboard size
-        // Checkboard size
-        int CHECKERBOARD[2]{7, 10};
-
-        // Check if there are enough images for calibration
-        if (count_ < 10)
+        // If the number of stored points is less than 10, print an error message
+        if (objpoints_.size() < 10 || imgpoints_.size() < 10)
         {
-            RCLCPP_ERROR(this->get_logger(), "Not enough images for calibration");
+            std::cout << "Error: Insufficient points for calibration" << std::endl;
             return;
         }
 
-        // Creating vector to store vectors of 3D points for each checkerboard image
-        std::vector<std::vector<cv::Point3f>> objpoints;
+        // Convert to grayscale
+        cv::Mat gray;
+        cv::cvtColor(image_, gray, cv::COLOR_BGR2GRAY);
 
-        // Creating vector to store vectors of 2D points for each checkerboard image
-        std::vector<std::vector<cv::Point2f>> imgpoints;
-
-        // Defining the world coordinates for 3D points
-        std::vector<cv::Point3f> objp;
-        for (int i{0}; i < CHECKERBOARD[1]; i++)
-        {
-            for (int j{0}; j < CHECKERBOARD[0]; j++)
-                objp.push_back(cv::Point3f(j, i, 0));
-        }
-
-        // Extracting path of individual image stored in a given directory
-        std::vector<cv::String> images;
-
-        // Path of the folder containing checkerboard images
-        std::string path = images_path + "*.png";
-
-        cv::glob(path, images);
-
-        cv::Mat frame, gray;
-        // vector to store the pixel coordinates of detected checker board corners
-        std::vector<cv::Point2f> corner_pts;
-        bool success;
-
-        // Looping over all the images in the directory
-        for (int i{0}; i < images.size(); i++)
-        {
-            frame = cv::imread(images[i]);
-            cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-
-            // Finding checker board corners
-            // If desired number of corners are found in the image then success = true
-            success = cv::findChessboardCorners(gray, cv::Size(CHECKERBOARD[0], CHECKERBOARD[1]), corner_pts, cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_FAST_CHECK | cv::CALIB_CB_NORMALIZE_IMAGE);
-
-            /*
-             * If desired number of corner are detected,
-             * we refine the pixel coordinates and display
-             * them on the images of checker board
-            */
-            if (success)
-            {
-                cv::TermCriteria criteria(cv::TermCriteria::EPS | cv::TermCriteria::COUNT, 30, 0.001);
-
-                // refining pixel coordinates for given 2d points.
-                cv::cornerSubPix(gray, corner_pts, cv::Size(11, 11), cv::Size(-1, -1), criteria);
-
-                // Displaying the detected corner points on the checker board
-                cv::drawChessboardCorners(frame, cv::Size(CHECKERBOARD[0], CHECKERBOARD[1]), corner_pts, success);
-
-                objpoints.push_back(objp);
-                imgpoints.push_back(corner_pts);
-            }
-
-            cv::imshow("Image", frame);
-            cv::waitKey(0);
-        }
-
-        cv::destroyAllWindows();
-
+        // Calibration parameters
         cv::Mat cameraMatrix, distCoeffs, R, T;
 
         /*
@@ -156,13 +62,66 @@ public:
          * passing the value of known 3D points (objpoints)
          * and corresponding pixel coordinates of the
          * detected corners (imgpoints)
-        */
-        cv::calibrateCamera(objpoints, imgpoints, cv::Size(gray.rows, gray.cols), cameraMatrix, distCoeffs, R, T);
+         */
+        cv::calibrateCamera(objpoints_, imgpoints_, cv::Size(gray.rows, gray.cols), cameraMatrix, distCoeffs, R, T);
 
-        
+        // Print the calibration parameters
+        std::cout << "Camera Matrix: " << cameraMatrix << std::endl;
+
+        // Reinitialize the objpoints and imgpoints
+        objpoints_.clear();
+        imgpoints_.clear();
     }
 
+    // Flag to store the points
+    bool store_points_{false};
+
 private:
+    // Function to compute points for calibration
+    cv::Mat compute_calibration_points(cv::Mat frame)
+    {
+        // Vector to store the pixel coordinates of detected checker board corners
+        std::vector<cv::Point2f> corner_pts;
+
+        // Defining the world coordinates for 3D points
+        std::vector<cv::Point3f> objp;
+        for (int i{0}; i < checkerboard_[1]; i++)
+        {
+            for (int j{0}; j < checkerboard_[0]; j++)
+                objp.push_back(cv::Point3f(j, i, 0));
+        }
+
+        // Convert the image to grayscale
+        cv::Mat gray;
+        cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+
+        // Finding checker board corners
+        bool success = cv::findChessboardCorners(gray, cv::Size(checkerboard_[0], checkerboard_[1]), corner_pts, cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_FAST_CHECK | cv::CALIB_CB_NORMALIZE_IMAGE);
+
+        if (success)
+        {
+            cv::TermCriteria criteria(cv::TermCriteria::EPS | cv::TermCriteria::COUNT, 30, 0.001);
+
+            // refining pixel coordinates for given 2d points.
+            cv::cornerSubPix(gray, corner_pts, cv::Size(11, 11), cv::Size(-1, -1), criteria);
+
+            // Displaying the detected corner points on the checker board
+            cv::drawChessboardCorners(frame, cv::Size(checkerboard_[0], checkerboard_[1]), corner_pts, success);
+
+            // If the stored points are more than 20, stop storing
+            if (objpoints_.size() < 20 && imgpoints_.size() < 20 && store_points_)
+            {
+                objpoints_.push_back(objp);
+                imgpoints_.push_back(corner_pts);
+                store_points_ = false;
+
+                std::cout << "Stored points: " << objpoints_.size() << std::endl;
+            }
+        }
+
+        return frame;
+    }
+
     // Function to display the image
     void show_image()
     {
@@ -189,7 +148,10 @@ private:
             return;
         }
 
-        std::string text = "Left click on the image to save it and right click to perform the calibration";
+        // Compute the calibration points
+        image_ = compute_calibration_points(image_);
+
+        std::string text = "Left click to store the points, Right click to calibrate the camera";
 
         // Display the image
         cv::imshow(text, image_);
@@ -214,24 +176,20 @@ private:
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::TimerBase::SharedPtr display_timer_;
 
-    // Counter for the image
-    size_t count_;
+    // Checkerboard size
+    int checkerboard_[2];
+
+    // Vector to store vectors of 3D points for each checkerboard image
+    std::vector<std::vector<cv::Point3f>> objpoints_;
+
+    // Vector to store vectors of 2D points for each checkerboard image
+    std::vector<std::vector<cv::Point2f>> imgpoints_;
 };
 
 // Free function to handle the mouse callback
 void onMouse(int event, int x, int y, int flags, void *userdata)
 {
-    if (event == cv::EVENT_LBUTTONDOWN)
-    {
-        // Retrieve the camera_calibration pointer from userdata
-        CameraCalibration *camera_calibration = static_cast<CameraCalibration *>(userdata);
-        if (camera_calibration != nullptr)
-        {
-            // Save the image
-            camera_calibration->save_image();
-        }
-    }
-    else if (event == cv::EVENT_RBUTTONDOWN)
+    if (event == cv::EVENT_RBUTTONDOWN)
     {
         // Retrieve the camera_calibration pointer from userdata
         CameraCalibration *camera_calibration = static_cast<CameraCalibration *>(userdata);
@@ -239,6 +197,16 @@ void onMouse(int event, int x, int y, int flags, void *userdata)
         {
             // Perform the calibration
             camera_calibration->perform_calibration();
+        }
+    }
+    else if (event == cv::EVENT_LBUTTONDOWN)
+    {
+        // Retrieve the camera_calibration pointer from userdata
+        CameraCalibration *camera_calibration = static_cast<CameraCalibration *>(userdata);
+        if (camera_calibration != nullptr)
+        {
+            // Set the flag to store the points
+            camera_calibration->store_points_ = true;
         }
     }
 }
@@ -264,15 +232,25 @@ int main(int argc, char **argv)
         }
     }
 
-    // Ask for the camera name
-    std::string camera_name;
-    std::cout << "Enter the camera name: ";
-    std::cin >> camera_name;
+    // Ask the user for the checkerboard size
+    int checkerboard_size[2];
+    while (true)
+    {
+        std::cout << "Enter the number of rows in the checkerboard: ";
+        std::cin >> checkerboard_size[0];
+        std::cout << "Enter the number of columns in the checkerboard: ";
+        std::cin >> checkerboard_size[1];
 
-    // TODO: use the camera name to create a folder with the calibration images and parameters
+        if (checkerboard_size[0] > 0 && checkerboard_size[1] > 0)
+        {
+            break;
+        }
+
+        std::cout << "Invalid checkerboard size" << std::endl;
+    }
 
     // Create the camera calibration object
-    auto camera_calibration = std::make_shared<CameraCalibration>(camera_id);
+    auto camera_calibration = std::make_shared<CameraCalibration>(camera_id, checkerboard_size);
 
     // Spin the node
     rclcpp::spin(camera_calibration);
