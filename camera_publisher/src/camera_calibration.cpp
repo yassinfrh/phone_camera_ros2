@@ -65,12 +65,26 @@ public:
          */
         cv::calibrateCamera(objpoints_, imgpoints_, cv::Size(gray.rows, gray.cols), cameraMatrix, distCoeffs, R, T);
 
-        // Print the calibration parameters
-        std::cout << "Camera Matrix: " << cameraMatrix << std::endl;
+        // Save the calibration parameters
+        std::string file_path = calibration_path + "calibration_parameters.txt";
+        std::ofstream file(file_path);
+        if (file.is_open())
+        {
+            file << "Camera Matrix: " << std::endl;
+            file << cameraMatrix << std::endl
+                 << std::endl;
+
+            file << "Distortion Coefficients: " << std::endl;
+            file << distCoeffs << std::endl
+                 << std::endl;
+
+            file.close();
+        }
 
         // Reinitialize the objpoints and imgpoints
         objpoints_.clear();
         imgpoints_.clear();
+
     }
 
     // Flag to store the points
